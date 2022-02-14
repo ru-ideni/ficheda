@@ -70,7 +70,7 @@ killall -TERM ficheda
 
 #### поток - Calculator
 - открываю поданый файл (ошибка - диагностика в syslog & json-pipe)
-- читаю файл и считаю CRC32 (ошибка - диагностика в syslog & json-pipe)
+- блочно читаю файл и считаю CRC32 (ошибка - диагностика в syslog & json-pipe)
 - закрываю файл (ошибка - диагностика в syslog & json-pipe)
 - результат расчёта в json-pipe
 
