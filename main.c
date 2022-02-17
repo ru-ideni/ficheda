@@ -1,4 +1,3 @@
-
 /*
  *  File Check Daemon
  *
@@ -21,6 +20,7 @@
  *  - первичный расчёт CRC32
  *  - инициализация обработчика сигнала USR1
  *  - инициализация потока расчёта по таймеру (генерирует сигнал USR1)
+ *  - инициализация потока inotify (генерирует сигнал USR1)
  *  - основной цикл вторичных расчётов
  *    - ожидание сигнала USR1
  *    - сканирование рабочего каталога
@@ -69,13 +69,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <sys/inotify.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #define CRC_START_32      0xFFFFFFFFul
-#define BUFF_SIZE         1048576
+#define FIN_BUFF_SIZE     1048576
 #define CRC_THREADS_MAX   55
+#define INO_EVENT_SIZE     sizeof(struct inotify_event)
 
 static inline uint32_t crc32_start();
 static inline uint32_t crc32_update(uint32_t crc, unsigned char c);
@@ -94,6 +96,7 @@ sem_t sem_json_write_finish;
 pthread_t tid_calculators_launcher;
 pthread_t tid_interval_sigusr1_raiser;
 pthread_t tid_json_writer;
+pthread_t tid_inotify;
 int pipefd[2];
 pthread_mutex_t mutex_pipe_write;
 
@@ -109,6 +112,7 @@ struct FCD_FILE {
 
 struct FCD_FILE *fcd_file_first = NULL;
 struct FCD_FILE *fcd_file_last = NULL;
+int inotifyFd;
 
 void obtain_mission(int _argc, char* _argv[]);
 void skeleton_daemon();
@@ -122,6 +126,7 @@ void *thread_crc32_calculator_entry_point(void *_arg);
 _Noreturn void *thread_calculators_launcher_entry_point(void *_arg);
 _Noreturn void *thread_interval_sigusr1_raiser_entry_point(void *_arg);
 _Noreturn void *thread_json_writer_entry_point(void *_arg);
+_Noreturn void *thread_mission_path_inotify(void *_arg);
 void severe_error_0(const char* _errt, int _errc);
 void severe_error_1(const char* _errt);
 void severe_error_2(const char* _errf, const char* _errt, int _errc);
@@ -195,26 +200,26 @@ int main(int _argc, char* _argv[]) {
 void skeleton_daemon()
 {
   pid_t pid;
-  /* Fork off the parent process */
+  // Fork off the parent process
   pid = fork();
-  /* An error occurred */
+  // An error occurred
   if (pid < 0) exit(EXIT_FAILURE);
-  /* Success: Let the parent terminate */
+  // Success: Let the parent terminate
   if (pid > 0) exit(EXIT_SUCCESS);
-  /* On success: The child process becomes session leader */
+  // On success: The child process becomes session leader
   if (setsid() < 0) exit(EXIT_FAILURE);
-  /* Fork off for the second time*/
+  // Fork off for the second time
   pid = fork();
-  /* An error occurred */
+  // An error occurred
   if (pid < 0) exit(EXIT_FAILURE);
-  /* Success: Let the parent terminate */
+  // Success: Let the parent terminate
   if (pid > 0) exit(EXIT_SUCCESS);
-  /* Set new file permissions */
+  // Set new file permissions
   umask(0);
-  /* Change the working directory to the root directory */
-  /* or another appropriated directory */
+  // Change the working directory to the root directory
+  // or another appropriated directory
   chdir("/");
-  /* Close all open file descriptors */
+  // Close all open file descriptors
   int x;
   for (x = sysconf(_SC_OPEN_MAX); x>=0; x--)
   {
@@ -244,6 +249,41 @@ void my_write_pipe(void* _src, size_t _sz) {
   int wl;
   if ((wl=write(pipefd[1], _src, _sz)) < 0) severe_error_0("write(pipefd[1])", errno);
   if (wl != _sz) severe_error_3("write(pipefd[1]) dl=%i, wl=i%", _sz, wl);
+}
+
+_Noreturn void *thread_mission_path_inotify(void *_arg){
+  int rl;
+  char ino_buff[1024];
+  struct inotify_event *ino_event = (struct inotify_event *)&ino_buff;
+//  char event[sizeof(struct inotify_event)] __attribute__ ((aligned(8)));
+  //  loop for inotify
+  while (1) {
+    //  read inotify event structure
+    rl = read(inotifyFd, ino_buff, sizeof(ino_buff));
+    if (rl < 1) severe_error_0("read(INOTIFY)", errno);
+    //  check
+    if ((ino_event->mask & IN_DELETE_SELF) || (ino_event->mask & IN_MOVE_SELF)) {
+      //  disaster!!!
+      syslog(LOG_ERR, "Disaster!!! Mission directory - deleted!!!");
+      exit(EXIT_FAILURE);
+    } else {
+      //  post SIGUSR1 semaphore
+      sem_post(&sem_sigusr1_queue);
+    }
+  }
+}
+
+void thread_calculators_launcher_inotify(void) {
+  int cc;
+  //  initialize inotify
+  inotifyFd = inotify_init();                 // Create inotify instance
+  if (inotifyFd == -1) severe_error_0("inotify_init()", errno);
+  //  add watch
+  cc = inotify_add_watch(inotifyFd, mission_path, IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF);
+  if (cc == -1) severe_error_0("inotify_add_watch()", errno);
+  //  create thread
+  cc = pthread_create(&tid_inotify, NULL, &thread_mission_path_inotify, NULL);
+  if (cc != 0) severe_error_0("pthread_create(fcd_file)", cc);
 }
 
 void thread_calculators_launcher_pipe_status(char* _file, char *_msg) {
@@ -292,6 +332,8 @@ _Noreturn void *thread_calculators_launcher_entry_point(void *_arg) {
   //  initialize interval-timer
   cc = pthread_create(&tid_interval_sigusr1_raiser, NULL, &thread_interval_sigusr1_raiser_entry_point, NULL);
   if (cc != 0) severe_error_0("pthread_create(tid_interval_sigusr1_raiser)", cc);
+  //  initialize inotify event
+  thread_calculators_launcher_inotify();
   //  regular calculation
   for (int ittr=1; ; ++ittr) {
     //  wait for next signal
@@ -413,9 +455,9 @@ void *thread_crc32_calculator_entry_point(void *_arg) {
     thread_crc32_calculator_finish(fcd_file, "fopen", errno, NULL);
     return NULL;
   }
-  u_char *buff = my_malloc(BUFF_SIZE);
+  u_char *buff = my_malloc(FIN_BUFF_SIZE);
   uint32_t crc32 = crc32_start();
-  for (; (i = fread(buff, 1, BUFF_SIZE, fin)) > 0;) {
+  for (; (i = fread(buff, 1, FIN_BUFF_SIZE, fin)) > 0;) {
     u_char* ptr = buff;
     for (int j = 0; j < i; ++j) {
       crc32 = crc32_update(crc32, *(ptr++));
@@ -475,8 +517,6 @@ _Noreturn void *thread_json_writer_entry_point(void *_arg) {
     FILE* fout = fopen(mission_json, "w+t");
     if (!fout) severe_error_0("fopen(mission_json)", errno);
     //  write json-header
-//    if ((ct = time(NULL)) == (time_t) -1) severe_error_0("time()", errno);
-//    if (fprintf(fout, "linux_time:%li\n", ct) < 0) severe_error_0("fprintf(fout)", errno);
     if (fprintf(fout, "[\n") < 0) severe_error_0("fprintf(fout)", errno);
     //  loop for output data
     for (int ilf=1; ilf>0; ++ilf) {
