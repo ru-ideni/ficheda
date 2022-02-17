@@ -285,6 +285,8 @@ _Noreturn void *thread_calculators_launcher_entry_point(void *_arg) {
       severe_error_1("Initial calculation failed! Program stoped!");
     fcd_file = fcd_file->next;
   }
+  //  syslog message
+  syslog(LOG_NOTICE, "Initial calculation finished. Service ready.");
   //  initialize SIGUSR1-handler
   if (signal(SIGUSR1, my_signals_handler) == SIG_ERR) severe_error_0("signal(SIGUSR1)", errno);
   //  initialize interval-timer
