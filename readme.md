@@ -1,36 +1,36 @@
 # ficheda
 
 ### File Check Daemon
-Usage: ficheda [-p path] [-i interval] [-j json]
-Or set an environment variable FICHEDA_PATH, FICHEDA_INTERVAL, FICHEDA_JSON respectively.
+Usage: ficheda [-p path] [-i interval] [-j json]  
+Or set an environment variable FICHEDA_PATH, FICHEDA_INTERVAL, FICHEDA_JSON respectively  
 
 #### Сборка
-git clone https://github.com/ru-ideni/ficheda
-cd ./ficheda/
-./build.sh
+git clone https://github.com/ru-ideni/ficheda  
+cd ./ficheda/  
+./build.sh  
 
 #### Запуск с параметрами
-cd ./bin/
-./ficheda -p /home/denis/FTC -i 2 -j /tmp/ficheda.json
+cd ./bin/  
+./ficheda -p /home/denis/FTC -i 2 -j /tmp/ficheda.json  
 
 #### Запуск с переменными окружения
-cd ./bin/
-export FICHEDA_PATH=/home/denis/FTC/
-export FICHEDA_INTERVAL=2
-export FICHEDA_JSON=/tmp/ficheda.json
-./ficheda
+cd ./bin/  
+export FICHEDA_PATH=/home/denis/FTC/  
+export FICHEDA_INTERVAL=2  
+export FICHEDA_JSON=/tmp/ficheda.json  
+./ficheda  
 
 #### Комбинированный запуск
-cd ./bin/
-export FICHEDA_PATH=/home/denis/FTC/
-export FICHEDA_JSON=/tmp/ficheda.json
-./ficheda -i 2
+cd ./bin/  
+export FICHEDA_PATH=/home/denis/FTC/  
+export FICHEDA_JSON=/tmp/ficheda.json  
+./ficheda -i 2  
 
 #### Команды мониторинга и управления
-sudo tail -f /var/log/syslog
-while true; do cat /tmp/fichede.json; sleep 1; done
-while true; do killall -USR1 fichede; sleep 1; done
-killall -TERM ficheda
+sudo tail -f /var/log/syslog  
+while true; do cat /tmp/fichede.json; sleep 1; done  
+while true; do killall -USR1 fichede; sleep 1; done  
+killall -TERM ficheda  
 
 ### Общий алгоритм:
 - отключение обработки некоторых сигналов
