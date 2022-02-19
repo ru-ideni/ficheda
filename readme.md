@@ -9,6 +9,9 @@ git clone https://github.com/ru-ideni/ficheda
 cd ./ficheda/  
 ./build.sh  
 
+#### Тестирование
+./test.sh  
+
 #### Запуск с параметрами
 cd ./bin/  
 ./ficheda -p /home/denis/FTC -i 2 -j /tmp/ficheda.json  
